@@ -72,7 +72,50 @@ section[data-testid="stSidebar"] [data-testid="stFileUploader"] button {
   background: #2a206f;
   padding: 14px 12px 10px 12px;
   margin: -1rem -1rem 0 -1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.18);
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.rcg-sidebar-appname{
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.95rem;
+  text-align: center;
+  margin-top: 6px;
+  letter-spacing: 0.2px;
+}
+section[data-testid="stSidebar"] .stFileUploader, 
+section[data-testid="stSidebar"] .stRadio, 
+section[data-testid="stSidebar"] .stSelectbox, 
+section[data-testid="stSidebar"] .stToggle{
+  color: #ffffff !important;
+}
+section[data-testid="stSidebar"] label, 
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div{
+  color: #ffffff;
+}
+
+/* Make multiselect tags match brand (no red) */
+section[data-testid="stSidebar"] [data-baseweb="tag"]{
+  background: #2a206f !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.25) !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] svg{
+  fill: #ffffff !important;
+}
+section[data-testid="stSidebar"] [data-baseweb="tag"] [role="button"]{
+  color: #ffffff !important;
+}
+
+/* Buttons in sidebar high contrast */
+section[data-testid="stSidebar"] .stButton>button{
+  background: #6498be !important;
+  color: #ffffff !important;
+  border: 0 !important;
+}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  filter: brightness(0.95);
 }
 
 /* Buttons */
@@ -110,6 +153,11 @@ section[data-testid="stSidebar"] .stButton>button:hover {
 .stTabs [aria-selected="true"] { color: #2a206f !important; }
 
 h1, h2, h3, h4 { color: #2a206f; }
+
+/* Ensure text contrast on inputs in main area */
+div[data-baseweb="select"] span { color: #111827 !important; }
+input { color: #111827 !important; }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -132,6 +180,17 @@ def save_settings(settings: Dict) -> None:
         json.dump(settings, f, indent=2, ensure_ascii=False)
 
 SETTINGS = load_settings()
+from datetime import date, timedelta
+
+def _last_full_month_range(today: date | None = None) -> Tuple[date, date]:
+    """Return (first_day, last_day) of the last completed calendar month."""
+    if today is None:
+        today = date.today()
+    first_this_month = today.replace(day=1)
+    last_prev_month = first_this_month - timedelta(days=1)
+    first_prev_month = last_prev_month.replace(day=1)
+    return first_prev_month, last_prev_month
+
 
 # ---------- Column expectations ----------
 REQUIRED_COLUMNS = [
@@ -399,6 +458,15 @@ with hr:
 
 # ---------- Sidebar ----------
 with st.sidebar:
+    # Fixed / sticky logo at top of sidebar (always above upload)
+    st.markdown('<div class="rcg-sidebar-logo">', unsafe_allow_html=True)
+    try:
+        st.image("logo.png", width=180)
+    except Exception:
+        pass
+    st.markdown('<div class="rcg-sidebar-appname">YJ - RCG Sales Reports</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
     st.header("UPLOAD")
     uploaded = st.file_uploader("CSV or Excel", type=["csv", "xlsx", "xls"])
     st.markdown("---")
@@ -613,7 +681,7 @@ st.markdown("---")
 
 
 # ---------- Navigation ----------
-PAGES = ["Overview","Branches","Employees","Products","Customers","Returns","Invoices","Details","Raw data","Export"]
+PAGES = ["Overview","Branches","Employees","Products","Customers","Returns","Invoices","Reports","Details","Raw data","Export"]
 if "page" not in st.session_state:
     st.session_state["page"] = "Overview"
 page = st.radio("Navigate", options=PAGES, index=PAGES.index(st.session_state["page"]), horizontal=True, label_visibility="collapsed")
@@ -659,8 +727,8 @@ if "details" not in st.session_state:
 def open_details(kind: str, value: str):
     apply_choice = details_context_prompt()
     st.session_state["details"] = {"kind": kind, "value": value, "apply_filters": apply_choice}
-    remember_recent(kind, value)
     st.session_state["page"] = "Details"
+    remember_recent(kind, value)
     st.rerun()
 
 # ---------- Tabs ----------
@@ -709,30 +777,96 @@ def show_transactions(df_in: pd.DataFrame, label: str):
     csv = view.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Export transactions CSV", csv, f"{label}_transactions.csv", "text/csv")
 
-if page == "Overview":
-    l, r = st.columns([2, 1])
-    with l:
-        st.subheader("Revenue trend")
-        if not by_day.empty:
-            choose_chart_money(by_day, trend_chart, "Sale Day",
-                               "Total_Inc_VAT" if revenue_basis == "Total (incl VAT)" else "Total_Ex_VAT",
-                               "Revenue over time", y_is_money=True)
-        else:
-            st.info("No valid Sale Date values to plot.")
-    with r:
-        st.subheader("Quick open details")
-        p = selection_block("Product", all_products, "ov_prod")
-        if st.button("View product details", disabled=not bool(p), key="btn_view_product_details_overview"):
-            open_details("Product", p)
-        e = selection_block("Employee", all_employees, "ov_emp")
-        if st.button("View employee details", disabled=not bool(e), key="btn_view_employee_details_overview"):
-            open_details("Employee", e)
 
-        st.markdown("---")
-        st.caption("Top products")
-        st.dataframe(style_table(by_product.head(10)[["Product","Sales_Lines","Net_Units","Total_Inc_VAT","Total_Ex_VAT","Return_Lines"]],
-                                 ["Total_Inc_VAT","Total_Ex_VAT"], ["Sales_Lines","Net_Units","Return_Lines"]),
-                     use_container_width=True, hide_index=True)
+# ---------- Reports ----------
+def report_sales_on_misc(df_stats: pd.DataFrame, revenue_col: str, date_range=None):
+    """
+    Sales on MISC report:
+    Includes customer names that are:
+      - blank / missing
+      - MISC2
+      - Mr MISC2
+      - Mr MISC2 MISC2
+      - Mr Misc Misc2
+    Case-insensitive, spacing-insensitive.
+    Removes rows where total value == 0 (both view + export).
+    Count is unique Sale Reference.
+    """
+    import pandas as pd
+
+    if date_range is None:
+        date_range = _last_full_month()
+
+    d0, d1 = date_range
+    dff = df_stats.copy()
+
+    # Date filter uses Sale Date when present
+    if "Sale Date" in dff.columns:
+        dff["Sale Date"] = pd.to_datetime(dff["Sale Date"], errors="coerce")
+        dff = dff[dff["Sale Date"].notna()].copy()
+        dff = dff[(dff["Sale Date"].dt.date >= d0) & (dff["Sale Date"].dt.date <= d1)].copy()
+
+    # Customer normalization (safe for Categoricals)
+    cust = dff.get("Customer Name", pd.Series([""] * len(dff)))
+    cust = cust.astype("string").fillna("")
+    cust_norm = cust.str.strip().str.replace(r"\s+", " ", regex=True).str.lower()
+
+    # Blank customers
+    is_blank = cust_norm.eq("") | cust_norm.isin(["nan", "none", "null"])
+
+    # MISC2 variants (regex after normalization)
+    misc_re = r"^(mr\s+)?(misc\s+)?misc2(\s+misc2)?$"
+    is_misc = cust_norm.str.match(misc_re, na=False)
+
+    dff = dff[is_blank | is_misc].copy()
+
+    if dff.empty:
+        empty_emp = pd.DataFrame(columns=["Employee", "Total_Value", "Sales_Count"])
+        empty_br = pd.DataFrame(columns=["Sale site", "Total_Value", "Sales_Count"])
+        return dff, empty_emp, empty_br, {"grand_total": 0.0, "grand_count": 0, "d0": d0, "d1": d1}
+
+    # Ensure keys exist
+    if "Employee" not in dff.columns:
+        dff["Employee"] = "Unknown"
+    if "Sale site" not in dff.columns and "Branch" in dff.columns:
+        dff["Sale site"] = dff["Branch"]
+    if "Sale site" not in dff.columns:
+        dff["Sale site"] = "Unknown"
+    if "Sale Reference" not in dff.columns:
+        dff["Sale Reference"] = ""
+
+    dff["Employee"] = dff["Employee"].astype("string").fillna("Unknown")
+    dff["Sale site"] = dff["Sale site"].astype("string").fillna("Unknown")
+    dff["Sale Reference"] = dff["Sale Reference"].astype("string").fillna("")
+
+    # Revenue numeric
+    if revenue_col not in dff.columns:
+        dff[revenue_col] = 0.0
+    dff[revenue_col] = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0.0)
+
+    emp = (
+        dff.groupby("Employee", dropna=False)
+        .agg(Total_Value=(revenue_col, "sum"), Sales_Count=("Sale Reference", pd.Series.nunique))
+        .reset_index()
+    )
+    br = (
+        dff.groupby("Sale site", dropna=False)
+        .agg(Total_Value=(revenue_col, "sum"), Sales_Count=("Sale Reference", pd.Series.nunique))
+        .reset_index()
+    )
+
+    emp["Total_Value"] = pd.to_numeric(emp["Total_Value"], errors="coerce").fillna(0.0)
+    br["Total_Value"] = pd.to_numeric(br["Total_Value"], errors="coerce").fillna(0.0)
+
+    # Drop £0 rows
+    emp = emp.loc[emp["Total_Value"] != 0].copy().sort_values("Total_Value", ascending=False)
+    br = br.loc[br["Total_Value"] != 0].copy().sort_values("Total_Value", ascending=False)
+
+    grand_total = float(br["Total_Value"].sum()) if not br.empty else 0.0
+    grand_count = int(emp["Sales_Count"].sum()) if not emp.empty else 0
+
+    return dff, emp, br, {"grand_total": grand_total, "grand_count": grand_count, "d0": d0, "d1": d1}
+
 
 def drill_tab(kind: str, df_rank: pd.DataFrame, key_col: str, options: List[str], select_key: str):
     st.subheader(f"{kind}s")
@@ -786,6 +920,84 @@ if page == "Invoices":
     inv2 = inv.sort_values("Total_Inc_VAT" if revenue_basis == "Total (incl VAT)" else "Total_Ex_VAT", ascending=False)
     st.dataframe(style_table(inv2.head(500), ["Total_Inc_VAT","Total_Ex_VAT"], ["Sales_Lines","Net_Units"]), use_container_width=True, hide_index=True)
 
+
+if page == "Reports":
+    st.subheader("Reports")
+    st.caption("Generate reports. Defaults to last full month; adjust as needed.")
+
+    if "report_selected" not in st.session_state:
+        st.session_state["report_selected"] = "misc"
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("#### Sales on MISC")
+        st.caption("MISC2 variants + blank customer names. Count = unique Sale Reference.")
+        if st.button("View report", key="rep_misc_view"):
+            st.session_state["report_selected"] = "misc"
+            st.rerun()
+    with c2:
+        st.markdown("#### Coming soon")
+        st.caption("Add more retail reports here.")
+    with c3:
+        st.markdown("#### Coming soon")
+        st.caption("Add more retail reports here.")
+
+    st.markdown("---")
+
+    if st.session_state["report_selected"] == "misc":
+        st.markdown("## Sales on MISC")
+        d0_def, d1_def = _last_full_month_range()
+        r1, r2, r3 = st.columns([1,1,1.2])
+        with r1:
+            d0 = st.date_input("From", value=d0_def, key="misc_d0")
+        with r2:
+            d1 = st.date_input("To", value=d1_def, key="misc_d1")
+        with r3:
+            st.write("")
+            st.caption(f"Revenue basis: **{revenue_basis}**")
+
+        revenue_col = "Total" if revenue_basis == "Total (incl VAT)" else "Total Without Vat"
+        misc_df, emp, br, meta = report_sales_on_misc(df_f, revenue_col=revenue_col, date_range=(d0, d1))
+
+        m1, m2 = st.columns(2)
+        m1.metric("Total MISC revenue", fmt_gbp(meta["grand_total"]))
+        m2.metric("Sales count (unique Sale Reference)", f"{meta['grand_count']:,}")
+
+        st.markdown("### By employee")
+        if emp.empty:
+            st.info("No MISC sales for the selected period.")
+        else:
+            choose_chart_money(emp, top_chart, "Employee", "Total_Value", "All employees", y_is_money=True)
+            st.dataframe(style_table(emp, ["Total_Value"], ["Sales_Count"]), use_container_width=True, hide_index=True)
+
+        st.markdown("### By branch")
+        if br.empty:
+            st.info("No branches with non-zero MISC sales for the selected period.")
+        else:
+            choose_chart_money(br, top_chart, "Sale site", "Total_Value", "All branches", y_is_money=True)
+            st.dataframe(style_table(br, ["Total_Value"], ["Sales_Count"]), use_container_width=True, hide_index=True)
+
+        st.markdown("### Download")
+        tables = {
+            "MISC By Employee": emp.rename(columns={"Total_Value":"Total"}),
+            "MISC By Branch": br.rename(columns={"Total_Value":"Total"}),
+        }
+        summary_kpis = {
+            "From": str(d0),
+            "To": str(d1),
+            "Revenue basis": revenue_basis,
+            "Total MISC revenue": fmt_gbp(meta["grand_total"]),
+            "Sales count": f"{meta['grand_count']:,}",
+        }
+        excel_bytes = make_excel_report(misc_df, summary_kpis, tables)
+        st.download_button(
+            "⬇️ Download Sales on MISC (Excel)",
+            excel_bytes,
+            file_name=f"Sales_on_MISC_{d0}_{d1}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_misc_excel",
+        )
+
 if page == "Details":
     st.subheader("Details")
     det = st.session_state.get("details", {})
@@ -803,6 +1015,7 @@ if page == "Details":
                     for it in items:
                         if st.button(f"Open {k}: {it}", key=f"rec_{k}_{it}"):
                             st.session_state["details"] = {"kind": k, "value": it, "apply_filters": apply_current}
+                            st.session_state["page"] = "Details"
                             st.rerun()
 
     if not (kind and value):
