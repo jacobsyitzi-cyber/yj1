@@ -158,6 +158,27 @@ h1, h2, h3, h4 { color: #2a206f; }
 div[data-baseweb="select"] span { color: #111827 !important; }
 input { color: #111827 !important; }
 
+
+/* Sidebar rebuild improvements */
+section[data-testid="stSidebar"] > div {
+  background: #2a206f;
+}
+section[data-testid="stSidebar"] * {
+  color: #ffffff !important;
+}
+section[data-testid="stSidebar"] .stTextInput input,
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
+section[data-testid="stSidebar"] .stDateInput input {
+  background: rgba(255,255,255,0.10) !important;
+  border: 1px solid rgba(255,255,255,0.25) !important;
+  color: #ffffff !important;
+}
+section[data-testid="stSidebar"] .stTextInput input::placeholder {
+  color: rgba(255,255,255,0.70) !important;
+}
+/* Make sidebar logo white */
+.rcg-sidebar-logo img { filter: brightness(0) invert(1); }
 </style>
 """,
     unsafe_allow_html=True,
@@ -445,6 +466,15 @@ def make_excel_report(df_filtered: pd.DataFrame, kpis_dict: Dict[str, str], tabl
     output.seek(0)
     return output.getvalue()
 
+
+# ---------- Navigation helpers ----------
+def open_details(kind: str, value: str):
+    """Navigate to Details page and set selected entity."""
+    st.session_state["page"] = "Details"
+    st.session_state["details_kind"] = kind
+    st.session_state["details_value"] = value
+    st.rerun()
+
 # ---------- Header ----------
 hl, hr = st.columns([1, 7], vertical_alignment="center")
 with hl:
@@ -497,14 +527,8 @@ all_products = sorted([c for c in df["Product Name"].astype(str).unique().tolist
 
 # ---------- Exclusions ----------
 with st.sidebar:
-    # Sticky logo
-    st.markdown('<div class="rcg-sidebar-logo">', unsafe_allow_html=True)
-    try:
-        st.image("logo.png", width=170)
-    except Exception:
-        pass
-    st.markdown(f"<div style='text-align:center; font-weight:900; margin-top:6px;'>{APP_NAME}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.header("QUICK SEARCH")
+    st.caption("Type to search products, employees, branches or customers. Click a result to jump to Details.")
 
     # Quick universal search
     st.markdown("### QUICK SEARCH")
@@ -871,19 +895,31 @@ def report_sales_on_misc(df_stats: pd.DataFrame, revenue_col: str, date_range=No
 def drill_tab(kind: str, df_rank: pd.DataFrame, key_col: str, options: List[str], select_key: str):
     st.subheader(f"{kind}s")
     sel = selection_block(kind, options, select_key)
+
+    # Live filter: the search box filters ALL charts/tables on this tab
+    qtxt = (st.session_state.get(f"q_{select_key}", "") or "").strip().lower()
+    df_view = df_rank.copy()
+    if qtxt:
+        df_view = df_view[df_view[key_col].astype(str).str.lower().str.contains(qtxt, na=False)].copy()
+
     if st.button(f"View {kind} details", disabled=not bool(sel), key=f"btn_{select_key}"):
         open_details(kind, sel)
 
     c1, c2 = st.columns([1.25, 1])
     with c1:
-        if not df_rank.empty:
-            choose_chart_money(df_rank, top_chart, key_col,
-                               "Total_Inc_VAT" if revenue_basis == "Total (incl VAT)" else "Total_Ex_VAT",
-                               f"Top {kind}s", y_is_money=True)
+        if not df_view.empty:
+            choose_chart_money(
+                df_view,
+                top_chart,
+                key_col,
+                "Total_Inc_VAT" if revenue_basis == "Total (incl VAT)" else "Total_Ex_VAT",
+                f"{kind}s (filtered)" if qtxt else f"Top {kind}s",
+                y_is_money=True,
+            )
         else:
-            st.info("No rows after filters.")
+            st.info("No rows after filters/search.")
     with c2:
-        st.dataframe(style_table(df_rank.head(200), money_cols_main, int_cols_main), use_container_width=True, hide_index=True)
+        st.dataframe(style_table(df_view.head(200), money_cols_main, int_cols_main), use_container_width=True, hide_index=True)
 
 if page == "Branches":
     drill_tab("Branch", by_branch, "Sale site", all_branches, "br")
@@ -893,13 +929,38 @@ if page == "Employees":
 
 if page == "Products":
     st.subheader("Products")
+
     sel = selection_block("Product", all_products, "prod")
+    qtxt = (st.session_state.get("q_prod", "") or "").strip().lower()
+
+    byp_view = by_product.copy()
+    if qtxt:
+        byp_view = byp_view[byp_view["Product"].astype(str).str.lower().str.contains(qtxt, na=False)].copy()
+
     if st.button("View product details", disabled=not bool(sel), key="btn_view_product_details_products"):
         open_details("Product", sel)
-    st.dataframe(style_table(by_product.head(200)[["Product","Department","Sales_Lines","Net_Units","Total_Inc_VAT","Total_Ex_VAT","Return_Lines"]],
-                             ["Total_Inc_VAT","Total_Ex_VAT"], ["Sales_Lines","Net_Units","Return_Lines"]),
-                 use_container_width=True, hide_index=True)
 
+    if not byp_view.empty:
+        choose_chart_money(
+            byp_view.head(25),
+            top_chart,
+            "Product",
+            "Total_Inc_VAT" if revenue_basis == "Total (incl VAT)" else "Total_Ex_VAT",
+            "Products (filtered)" if qtxt else "Top products",
+            y_is_money=True,
+        )
+    else:
+        st.info("No products match your search + filters.")
+
+    st.dataframe(
+        style_table(
+            byp_view.head(200)[["Product","Department","Sales_Lines","Net_Units","Total_Inc_VAT","Total_Ex_VAT","Return_Lines"]],
+            ["Total_Inc_VAT","Total_Ex_VAT"],
+            ["Sales_Lines","Net_Units","Return_Lines"]
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
 if page == "Customers":
     drill_tab("Customer", by_customer, "Customer Name", all_customers, "cust")
 
@@ -953,10 +1014,12 @@ if page == "Reports":
         with r2:
             d1 = st.date_input("To", value=d1_def, key="misc_d1")
         with r3:
-            st.write("")
-            st.caption(f"Revenue basis: **{revenue_basis}**")
+            misc_vat_mode = st.radio("Include VAT in this report?", ["Include VAT", "Exclude VAT"], index=0, horizontal=True, key="misc_vat_mode")
+            st.caption("This affects only the Sales on MISC report and its export.")
 
-        revenue_col = "Total" if revenue_basis == "Total (incl VAT)" else "Total Without Vat"
+        revenue_col = "Total" if misc_vat_mode == "Include VAT" else "Total Without Vat"
+        misc_revenue_label = "Total (incl VAT)" if misc_vat_mode == "Include VAT" else "Total Without Vat"
+
         misc_df, emp, br, meta = report_sales_on_misc(df_f, revenue_col=revenue_col, date_range=(d0, d1))
 
         m1, m2 = st.columns(2)
@@ -985,7 +1048,7 @@ if page == "Reports":
         summary_kpis = {
             "From": str(d0),
             "To": str(d1),
-            "Revenue basis": revenue_basis,
+            "Revenue basis": misc_revenue_label,
             "Total MISC revenue": fmt_gbp(meta["grand_total"]),
             "Sales count": f"{meta['grand_count']:,}",
         }
